@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Quota Usage</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --panel: #ffffff;
+    --text: #1b1b1f;
+    --muted: #6b6b76;
+    --border: #e3e3e8;
+    --weekly: #3f6fe0;
+    --fable: #d97706;
+    --grid: #ececf0;
+    --alert-zone: rgba(214, 68, 68, 0.13);
+    --standard-zone: rgba(56, 158, 104, 0.11);
+    --pacing-line: #8a8a94;
+    --alert-text: #b3392d;
+    --standard-text: #2e7d4f;
+    --stale-text: #b3690b;
+    --peak-hatch: rgba(90, 90, 100, 0.35);
+    --now-line: #9333ea;
+    --plan-line: #0d7c8c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171b;
+      --panel: #202024;
+      --text: #ececee;
+      --muted: #9a9aa4;
+      --border: #303036;
+      --weekly: #7d9dfa;
+      --fable: #fbbf24;
+      --grid: #2a2a30;
+      --alert-zone: rgba(224, 90, 90, 0.16);
+      --standard-zone: rgba(72, 178, 122, 0.14);
+      --pacing-line: #7a7a86;
+      --alert-text: #f0837a;
+      --standard-text: #6fce9e;
+      --stale-text: #f0a84e;
+      --peak-hatch: rgba(190, 190, 200, 0.3);
+      --now-line: #c084fc;
+      --plan-line: #4bc4d6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 16px;
+  }
+  h2 {
+    font-size: 1.1rem;
+    margin: 0;
+  }
+  .chart-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-bottom: 6px;
+    font-size: 1.1rem;
+  }
+  .chart-subtitle { color: var(--muted); font-size: 1.1rem; }
+  /* Cartes et bouton toujours sur une seule ligne : si la place manque,
+     renderStats bascule sur les libelles courts, puis tronque les resets. */
+  .stats-row {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    flex-wrap: nowrap;
+    margin-bottom: 14px;
+  }
+  .stats {
+    display: flex;
+    gap: 10px;
+    flex-wrap: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .controls { display: flex; align-items: center; flex: 0 0 auto; }
+  .toggle-btn {
+    font-size: 0.9rem;
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .toggle-btn:hover { background: var(--bg); }
+  .toggle-btn.active { background: var(--standard-text); color: #fff; border-color: var(--standard-text); }
+  body.compact .chart-header { display: none; }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  .stat-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: nowrap; }
+  .stats.tight .stat .reset { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .stat .label { color: var(--muted); font-size: 1.1rem; letter-spacing: 0.04em; white-space: nowrap; }
+  .stat .value { font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
+  .stat .reset { color: var(--muted); font-size: 1.1rem; white-space: nowrap; }
+  .stat .value.session.standard { color: var(--standard-text); }
+  .stat .value.session.alert { color: var(--alert-text); }
+  .stat .value.weekly.standard { color: var(--weekly); }
+  .stat .value.weekly.alert { color: var(--alert-text); }
+  .stat .value.fable { color: var(--fable); }
+  .stat .value.fable.alert { color: var(--alert-text); }
+  .stat .label .alert-prefix { color: var(--alert-text); font-weight: 700; }
+  .chart-section { margin-bottom: 14px; }
+  body.compact .charts-row { display: flex; gap: 12px; align-items: flex-start; }
+  body.compact .charts-row .chart-section { flex: 1; min-width: 0; }
+  .chart-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    overflow-x: auto;
+    position: relative;
+  }
+  canvas { width: 100%; height: 340px; display: block; }
+  .legend { display: flex; gap: 8px 20px; flex-wrap: wrap; font-size: 1.1rem; color: var(--muted); }
+  .legend span::before {
+    content: "";
+    display: inline-block;
+    width: 17px; height: 17px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .legend .l-session::before { background: var(--standard-text); }
+  .legend .l-weekly::before { background: var(--weekly); }
+  .legend .l-fable::before { background: var(--fable); }
+  .legend .l-alert::before { background: var(--alert-zone); border: 1px solid var(--pacing-line); border-radius: 3px; }
+  .legend .l-standard::before { background: var(--standard-zone); border: 1px solid var(--pacing-line); border-radius: 3px; }
+  .legend .l-peak::before {
+    background: repeating-linear-gradient(45deg, var(--peak-hatch) 0 2px, transparent 2px 6px);
+    border: 1px solid var(--muted);
+    border-radius: 3px;
+  }
+  .tooltip {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 22px;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 2;
+  }
+  .stale-warning { color: var(--stale-text); font-weight: 700; }
+  .legend .l-now::before {
+    background: var(--now-line);
+  }
+</style>
+</head>
+<body>
+  <div class="stats-row">
+    <div class="stats" id="stats"></div>
+    <div class="controls">
+      <button id="compact-toggle" class="toggle-btn" type="button">Compact</button>
+    </div>
+  </div>
+
+  <div class="charts-row">
+  <div class="chart-section">
+    <div class="chart-header">
+      <h2>Quota 5h</h2>
+      <span class="chart-subtitle">Dernieres 24 heures</span>
+      <span class="legend">
+        <span class="l-session">usage</span>
+        <span class="l-standard">zone standard</span>
+        <span class="l-alert">zone alerte</span>
+        <span class="l-peak">heures de pointe (Anthropic)</span>
+        <span class="l-now">maintenant</span>
+      </span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart-session"></canvas>
+      <div class="tooltip" id="tooltip-session"></div>
+    </div>
+  </div>
+
+  <div class="chart-section">
+    <div class="chart-header">
+      <h2>Quota 7j</h2>
+      <span class="chart-subtitle">3 dernieres semaines</span>
+      <span class="legend">
+        <span class="l-weekly">usage</span>
+        <span class="l-fable">Fable (% du plafond Fable)</span>
+        <span class="l-standard">zone standard</span>
+        <span class="l-alert">zone alerte</span>
+        <span class="l-now">maintenant</span>
+      </span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart-weekly"></canvas>
+      <div class="tooltip" id="tooltip-weekly"></div>
+    </div>
+  </div>
+  </div>
+
+<script>
+// Donnees embarquees directement a la generation (voir bin/generate-page.py) -
+// pas de fetch, donc ca fonctionne en ouvrant le fichier tel quel (file://).
+const RAW_CSV = `__CCUSAGE_CSV__`;
+const SESSION_PERIOD_MS = 5 * 3600 * 1000;
+const WEEKLY_PERIOD_MS = 7 * 24 * 3600 * 1000;
+
+function parseData() {
+  const lines = RAW_CSV.trim().split('\n').slice(1);
+  return lines
+    .filter(l => l.length > 0)
+    .map(l => l.split(','))
+    .filter(c => c.length >= 5 && c[1] !== '' && c[3] !== '')
+    .map(c => ({
+      ts: new Date(c[0]),
+      session: parseFloat(c[1]),
+      sessionReset: c[2],
+      weekly: parseFloat(c[3]),
+      weeklyReset: c[4],
+      tier: (c[5] || '').trim(),
+      // Limite hebdo propre a Fable, relative a son propre plafond (pas au
+      // quota 7j global) ; NaN quand non mesuree ou absente du plan.
+      fable: parseFloat(c[6]),
+      fableReset: (c[7] || '').trim(),
+    }));
+}
+
+// Palier d'abonnement (colonne rate_limit_tier du CSV). Les % renvoyes par
+// l'API sont relatifs au quota du plan : un 60% en Pro et un 60% en Max 5x
+// ne representent pas la meme consommation absolue. Les lignes anterieures
+// au suivi du plan ont un palier vide.
+const TIER_LABELS = {
+  default_claude_ai: 'Pro',
+  default_claude_max_5x: 'Max 5x',
+  default_claude_max_20x: 'Max 20x',
+};
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+}
+
+// Un palier absent du mapping s'affiche brut (echappe : il est insere en HTML).
+function tierLabel(tier) {
+  return tier ? (TIER_LABELS[tier] || escapeHtml(tier)) : 'inconnu';
+}
+
+// Frontieres de changement d'abonnement dans la serie : entre deux points
+// consecutifs dont le palier connu differe. Les points au palier vide sont
+// ignores - on ne sait pas s'ils encadrent un changement.
+function findTierChanges(points) {
+  const changes = [];
+  let prev = null;
+  points.forEach(p => {
+    if (!p.tier) return;
+    if (prev && prev.tier !== p.tier) {
+      changes.push({
+        ts: p.ts.getTime(),
+        from: prev.tier,
+        to: p.tier,
+        tsLabel: p.ts.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+      });
+    }
+    prev = p;
+  });
+  return changes;
+}
+
+// Texte de reset d'une carte, libelle "reset" compris. Le connecteur
+// ("dans"/"deja passe (il y a"/...) reste dans la couleur muette par defaut
+// du bloc ; seule la duree elle-meme (le chiffre) est coloree via colorVar,
+// pour matcher le % sans colorer tout le texte.
+function fmtReset(iso, colorVar, compact) {
+  // Pas de date de reset : aucune fenetre ouverte (typiquement la session 5h
+  // quand rien n'a tourne depuis plus de 5h).
+  if (!iso) return compact ? '' : 'aucune fenetre en cours';
+  const d = new Date(iso);
+  const diffMs = d - new Date();
+  if (diffMs <= 0) {
+    const agoMs = -diffMs;
+    const h = Math.floor(agoMs / 3600000);
+    const m = Math.floor((agoMs % 3600000) / 60000);
+    if (h === 0 && m < 2) return compact ? 'imminent' : 'reset imminent';
+    const dur = `<span style="color:${colorVar}">${h}h${String(m).padStart(2, '0')}</span>`;
+    return compact ? dur : `reset deja passe (il y a ${dur} - donnee probablement perimee)`;
+  }
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  if (h >= 24) {
+    const days = Math.floor(h / 24);
+    const dur = `<span style="color:${colorVar}">${days}j ${h % 24}h</span>`;
+    return compact ? dur : `reset dans ${dur}`;
+  }
+  const dur = `<span style="color:${colorVar}">${h}h${String(m).padStart(2, '0')}</span>`;
+  return compact ? dur : `reset dans ${dur}`;
+}
+
+// Variable CSS a utiliser pour la duree coloree ci-dessus, selon le meme
+// statut de zone que le %.
+function zoneColorVar(kind, cls) {
+  if (cls === 'alert') return 'var(--alert-text)';
+  return kind === 'session' ? 'var(--standard-text)' : 'var(--weekly)';
+}
+
+function fmtAge(ms) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
+  return `${m} min`;
+}
+
+// Au-dela de ce delai, la derniere mesure est probablement perimee (timer
+// arrete, veille en cours...) - on le signale legerement sur la ligne
+// "Last data", sans bandeau intrusif : ca reste un etat normal (machine
+// eteinte/en veille) la plupart du temps.
+const STALE_THRESHOLD_MS = 15 * 60 * 1000;
+
+// Cartes du haut sur une seule ligne : libelles complets s'ils tiennent,
+// sinon libelles courts (ceux de la vue compacte), et en dernier recours
+// textes de reset tronques.
+function renderStats(points) {
+  const el = document.getElementById('stats');
+  const overflows = () => [...el.querySelectorAll('.stat-row')].some(row => row.scrollWidth > row.clientWidth + 1);
+  el.classList.remove('tight');
+  fillStats(el, points, false);
+  if (!overflows()) return;
+  fillStats(el, points, true);
+  if (overflows()) el.classList.add('tight');
+}
+
+function fillStats(el, points, short) {
+  if (!points.length) { el.innerHTML = ''; return; }
+  const last = points[points.length - 1];
+  const ageMs = new Date() - last.ts;
+  const stale = ageMs > STALE_THRESHOLD_MS;
+
+  const sessionZone = zoneClass(last.session, last.sessionReset, SESSION_PERIOD_MS);
+  const weeklyZone = zoneClass(last.weekly, last.weeklyReset, WEEKLY_PERIOD_MS);
+  const compact = short || document.body.classList.contains('compact');
+
+  const sessionLabel = `${alertPrefix(sessionZone)}${compact ? '5h' : 'Quota 5h'}`;
+  const weeklyLabel = `${alertPrefix(weeklyZone)}${compact ? '7j' : 'Quota 7j'}`;
+  const sessionReset = fmtReset(last.sessionReset, zoneColorVar('session', sessionZone), compact);
+  const weeklyReset = fmtReset(last.weeklyReset, zoneColorVar('weekly', weeklyZone), compact);
+
+  // Indicateur leger de peremption, en vue standard seulement : "WARNING"
+  // devant le label "Last data" et l'age en orange.
+  const staleLabel = stale ? '<span class="stale-warning">WARNING</span> ' : '';
+  const ageStyle = stale ? ' style="color: var(--stale-text)"' : '';
+
+  // Le palier d'abonnement donne son sens aux % ci-dessus (ils sont
+  // relatifs au quota du plan) et signale ou l'historique cesse d'etre
+  // comparable.
+  const lastChange = findTierChanges(points).pop() || null;
+  const changeNote = (!compact && lastChange)
+    ? `<span class="reset">depuis le <strong>${lastChange.tsLabel}</strong></span>`
+    : '';
+  const planCard = `
+    <div class="stat plan">
+      <div class="stat-row">
+        <span class="label">${compact ? 'Plan' : 'Abonnement'}</span>
+        <span class="value" style="color: var(--plan-line); font-weight: 400;">${tierLabel(last.tier)}</span>
+        ${changeNote}
+      </div>
+    </div>`;
+
+  // Plafond Fable : meme zone de pacing que la semaine (meme regle que
+  // claude_wait.sh), appliquee a son propre %.
+  let fableCard = '';
+  if (!isNaN(last.fable)) {
+    const fableZone = zoneClass(last.fable, last.fableReset, WEEKLY_PERIOD_MS);
+    const fableColor = fableZone === 'alert' ? 'var(--alert-text)' : 'var(--fable)';
+    fableCard = `
+    <div class="stat">
+      <div class="stat-row">
+        <span class="label">${alertPrefix(fableZone)}${compact ? 'Fable' : 'Fable 7j'}</span>
+        <span class="value fable ${fableZone}">${last.fable.toFixed(0)}%</span>
+        <span class="reset">${fmtReset(last.fableReset, fableColor, compact)}</span>
+      </div>
+    </div>`;
+  }
+
+  const lastDataCard = compact ? '' : `
+    <div class="stat">
+      <div class="stat-row">
+        <span class="label">${staleLabel}Last data :</span>
+        <span class="value" style="color: var(--text); font-weight: 400;">${last.ts.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+        <span class="reset">il y a <strong${ageStyle}>${fmtAge(ageMs)}</strong></span>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    <div class="stat">
+      <div class="stat-row">
+        <span class="label">${sessionLabel}</span>
+        <span class="value session ${sessionZone}">${last.session.toFixed(0)}%</span>
+        <span class="reset">${sessionReset}</span>
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat-row">
+        <span class="label">${weeklyLabel}</span>
+        <span class="value weekly ${weeklyZone}">${last.weekly.toFixed(0)}%</span>
+        <span class="reset">${weeklyReset}</span>
+      </div>
+    </div>
+    ${fableCard}
+    ${planCard}
+    ${lastDataCard}
+  `;
+}
+
+// Seuil de pacing pour la periode en cours (du dernier reset moins sa duree,
+// jusqu'au prochain reset) : droite lineaire de 30% en debut de periode a
+// 90% en fin de periode, proportionnel au temps ecoule. En dessous = zone
+// standard, au-dessus = zone alerte.
+const PACING_START = 30;
+const PACING_END = 90;
+
+function pacingThreshold(t, periodStart, periodEnd) {
+  let frac = (t - periodStart) / (periodEnd - periodStart);
+  frac = Math.min(Math.max(frac, 0), 1);
+  return PACING_START + frac * (PACING_END - PACING_START);
+}
+
+// Meme calcul que bin/claude_wait.sh : temps avant que la ligne de pacing
+// (qui monte de 30% a 90% sur toute la periode) ne depasse l'usage actuel,
+// a consommation constante. Retourne null si deja en zone standard, sinon
+// {waitMs, atReset} (atReset=true si l'usage depasse 90%, auquel cas le
+// retour n'arrive qu'au reset).
+function waitForStandard(usage, resetIso, periodMs, now) {
+  if (!resetIso) return null;
+  const periodEnd = new Date(resetIso).getTime();
+  const periodStart = periodEnd - periodMs;
+  if (usage <= pacingThreshold(now, periodStart, periodEnd)) return null;
+  if (usage > PACING_END) return { waitMs: periodEnd - now, atReset: true };
+  const frac = (usage - PACING_START) / (PACING_END - PACING_START);
+  const crossing = periodStart + frac * periodMs;
+  return { waitMs: crossing - now, atReset: false };
+}
+
+// Prefixe "ALERTE" (rouge) devant le label quand on est en zone alerte.
+function alertPrefix(cls) {
+  return cls === 'alert' ? '<span class="alert-prefix">ALERTE</span> ' : '';
+}
+
+// Classe de couleur pour la valeur % : 'standard' ou 'alert' selon la ligne
+// de pacing.
+function zoneClass(usage, resetIso, periodMs) {
+  return waitForStandard(usage, resetIso, periodMs, Date.now()) ? 'alert' : 'standard';
+}
+
+// Heures de pointe Anthropic (voir promoclock.co) : jours ouvrables,
+// 13h-19h UTC (= 15h-21h a Paris en ete). Fixe en UTC dans la definition
+// officielle, donc pas de souci de changement d'heure ete/hiver a gerer
+// ici. Retourne les intervalles [debut,fin] (ms epoch) qui chevauchent la
+// fenetre visible.
+function getPeakIntervalsUTC(windowStart, windowEnd) {
+  const DAY_MS = 24 * 3600 * 1000;
+  const intervals = [];
+  let dayStart = new Date(windowStart);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  for (let d = dayStart.getTime(); d < windowEnd; d += DAY_MS) {
+    const utcDay = new Date(d).getUTCDay(); // 0=dimanche ... 6=samedi
+    if (utcDay >= 1 && utcDay <= 5) {
+      const peakStart = d + 13 * 3600 * 1000;
+      const peakEnd = d + 19 * 3600 * 1000;
+      if (peakEnd > windowStart && peakStart < windowEnd) {
+        intervals.push([Math.max(peakStart, windowStart), Math.min(peakEnd, windowEnd)]);
+      }
+    }
+  }
+  return intervals;
+}
+
+function drawHatchedRect(ctx, x1, y1, x2, y2, color, spacing) {
+  if (x2 <= x1) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x1, y1, x2 - x1, y2 - y1);
+  ctx.clip();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  const h = y2 - y1;
+  const w = x2 - x1;
+  const diag = w + h;
+  for (let off = -h; off < diag; off += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x1 + off, y1);
+    ctx.lineTo(x1 + off + h, y2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Bornes horaires (une par heure pleine) dans [windowStart, windowEnd].
+function hourBoundaries(windowStart, windowEnd) {
+  const HOUR = 3600 * 1000;
+  const start = Math.ceil(windowStart / HOUR) * HOUR;
+  const out = [];
+  for (let t = start; t <= windowEnd; t += HOUR) out.push(t);
+  return out;
+}
+
+// Minuits locaux (un par jour) dans [windowStart, windowEnd].
+function localMidnights(windowStart, windowEnd) {
+  const DAY_MS = 24 * 3600 * 1000;
+  const out = [];
+  let d = new Date(windowStart);
+  d.setHours(0, 0, 0, 0);
+  if (d.getTime() < windowStart) d = new Date(d.getTime() + DAY_MS);
+  for (let t = d.getTime(); t <= windowEnd; t += DAY_MS) out.push(t);
+  return out;
+}
+
+// Abreviations 3 lettres, alignees sur Date#getDay() (0=dimanche ... 6=samedi).
+const DAY_ABBREV_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+// Mode compact : une seule lettre (D/L/M/M/J/V/S), le double "M" (mardi/
+// mercredi) etant leve par la date affichee dessous.
+const DAY_ABBREV_FR_COMPACT = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+
+// Hauteur de graphe calculee pour que la page tienne dans le viewport sans
+// defiler : espace entre le haut du premier chart-wrap et le bas du
+// viewport, moins tout ce qui n'est pas un canvas en dessous de ce repere
+// (padding des cadres, en-tete et marges du second graphe), mesure sur la
+// mise en page courante. En mode normal (graphes empiles) les canvas se
+// partagent cet espace ; en mode compact (graphes cote a cote) chacun peut
+// le prendre en entier.
+const CHART_MAX_HEIGHT = 450;
+const CHART_MIN_HEIGHT = 200;
+function computeChartHeight(compact) {
+  const firstWrap = document.querySelector('.chart-wrap');
+  if (!firstWrap) return CHART_MAX_HEIGHT;
+  const top = firstWrap.getBoundingClientRect().top;
+  const sections = [...document.querySelectorAll('.chart-section')];
+  const bottom = Math.max(...sections.map(el =>
+    el.getBoundingClientRect().bottom + parseFloat(getComputedStyle(el).marginBottom)));
+  const canvasHeights = [...document.querySelectorAll('.chart-wrap canvas')]
+    .map(c => c.getBoundingClientRect().height);
+  const canvasTotal = compact ? Math.max(...canvasHeights) : canvasHeights.reduce((a, h) => a + h, 0);
+  const overhead = bottom - top - canvasTotal;
+  const available = window.innerHeight - top - overhead - 16;
+  const perChart = compact ? available : available / 2;
+  return Math.max(CHART_MIN_HEIGHT, Math.min(CHART_MAX_HEIGHT, Math.floor(perChart)));
+}
+
+function renderChart(canvasId, tooltipId, points, opts) {
+  const { valueKey, resetKey, secondaryKey, secondaryColorVar, windowMs, compactWindowMs, periodMs, lineColorVar, tickHourStep, compactTickHourStep, verticalGrid } = opts;
+  const canvas = document.getElementById(canvasId);
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = wrap.clientWidth - 32;
+  const compact = document.body.classList.contains('compact');
+
+  // Tailles de police du canvas, choisies pour rester lisibles quelle que
+  // soit la largeur d'ecran (les marges du graphe en dependent).
+  const fontAxis = 20;      // labels axe Y + ticks axe X
+  const fontDayLabel = 20;  // jour/date sous le graphe semaine
+  const fontEmpty = 42;     // message "pas de donnees"
+  const cssHeight = computeChartHeight(compact);
+
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = cssHeight + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const style = getComputedStyle(document.documentElement);
+  const col = (name) => style.getPropertyValue(name).trim();
+
+  const dayLabelLineH = Math.ceil(fontDayLabel * 1.25);
+  const padL = compact ? 16 : 78;
+  const padR = 16;
+  const padT = 16;
+  const padB = (verticalGrid === 'daily')
+    ? dayLabelLineH * 2 + 16
+    : Math.ceil(fontAxis * 1.3) + 12;
+  const plotW = cssWidth - padL - padR;
+  const plotH = cssHeight - padT - padB;
+  const maxY = 105;
+
+  const last = points.length ? points[points.length - 1] : null;
+  const now = Date.now();
+  // La periode en cours va du dernier reset connu (periodEnd, dans le futur
+  // le plus souvent) moins sa duree nominale, jusqu'a ce reset.
+  const periodEnd = last && last[resetKey] ? new Date(last[resetKey]).getTime() : now;
+  const periodStart = periodEnd - periodMs;
+  // Fenetre d'affichage : se termine au reset a venir si la periode en
+  // cours n'est pas finie (pour voir toute la zone), sinon a "maintenant".
+  let windowEnd = Math.max(now, periodEnd);
+  const effectiveWindowMs = (compact && compactWindowMs) ? compactWindowMs : windowMs;
+  let windowStart = windowEnd - effectiveWindowMs;
+  // Sur le graphe horaire (session), on cale le debut et la fin de la
+  // fenetre affichee pile sur des heures rondes, pour que la 1ere et la
+  // derniere colonne du quadrillage ne soient jamais des demi-colonnes -
+  // sinon les labels d'heure paraissent mal repartis.
+  if (verticalGrid === 'hourly') {
+    const HOUR = 3600 * 1000;
+    windowEnd = Math.ceil(windowEnd / HOUR) * HOUR;
+    windowStart = Math.floor(windowStart / HOUR) * HOUR;
+  } else if (verticalGrid === 'daily') {
+    // Meme principe que ci-dessus mais cale sur des minuits locaux (une
+    // colonne = un jour complet).
+    const startDay = new Date(windowStart);
+    startDay.setHours(0, 0, 0, 0);
+    windowStart = startDay.getTime();
+    const endDay = new Date(windowEnd);
+    endDay.setHours(0, 0, 0, 0);
+    if (endDay.getTime() < windowEnd) endDay.setDate(endDay.getDate() + 1);
+    windowEnd = endDay.getTime();
+  }
+
+  const visible = points.filter(p => p.ts.getTime() >= windowStart && p.ts.getTime() <= now);
+
+  const x = (t) => padL + ((t - windowStart) / (windowEnd - windowStart)) * plotW;
+  const y = (v) => padT + plotH - (v / maxY) * plotH;
+
+  // Grid + y axis labels
+  ctx.strokeStyle = col('--grid');
+  ctx.fillStyle = col('--muted');
+  ctx.font = `${fontAxis}px sans-serif`;
+  ctx.lineWidth = 1;
+  [0, 20, 40, 60, 80, 100].forEach(v => {
+    const yy = y(v);
+    ctx.beginPath();
+    ctx.moveTo(padL, yy);
+    ctx.lineTo(padL + plotW, yy);
+    ctx.stroke();
+    if (!compact) ctx.fillText(v + '%', 6, yy + 4);
+  });
+
+  // Quadrillage vertical : une ligne par heure (session) ou par minuit local
+  // (semaine), avec dans ce dernier cas le nom du jour + la date entre les
+  // lignes.
+  if (verticalGrid === 'hourly') {
+    ctx.strokeStyle = col('--grid');
+    ctx.lineWidth = 1;
+    hourBoundaries(windowStart, windowEnd).forEach(t => {
+      const xx = x(t);
+      ctx.beginPath();
+      ctx.moveTo(xx, padT);
+      ctx.lineTo(xx, padT + plotH);
+      ctx.stroke();
+    });
+  } else if (verticalGrid === 'daily') {
+    const midnights = localMidnights(windowStart, windowEnd);
+    ctx.strokeStyle = col('--grid');
+    ctx.lineWidth = 1;
+    midnights.forEach(t => {
+      const xx = x(t);
+      ctx.beginPath();
+      ctx.moveTo(xx, padT);
+      ctx.lineTo(xx, padT + plotH);
+      ctx.stroke();
+    });
+
+    // Jour (3 lettres) + date JJ/MM, horizontaux sur deux lignes, centres
+    // entre chaque paire de minuits (l'annee n'est pas repetee ici, elle
+    // est deja donnee une fois dans "derniere mesure").
+    // windowStart/windowEnd sont deja cales sur des minuits (voir plus
+    // haut), donc deja presents dans "midnights" - on evite de les
+    // dupliquer (ca creerait un segment de largeur nulle a chaque bord).
+    const bounds = [...new Set([windowStart, ...midnights, windowEnd])].sort((a, b) => a - b);
+    ctx.fillStyle = col('--muted');
+    ctx.font = `${fontDayLabel}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < bounds.length - 1; i++) {
+      const segStart = bounds[i], segEnd = bounds[i + 1];
+      const segMid = (segStart + segEnd) / 2;
+      const xx = x(segMid);
+      const dayDate = new Date(segMid);
+      const dayLine = compact ? DAY_ABBREV_FR_COMPACT[dayDate.getDay()] : DAY_ABBREV_FR[dayDate.getDay()];
+      const dateLine = compact
+        ? dayDate.toLocaleDateString('fr-FR', { day: '2-digit' })
+        : dayDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+      const yBase = cssHeight - dayLabelLineH * 2 - 4;
+      ctx.fillText(dayLine, xx, yBase);
+      ctx.fillText(dateLine, xx, yBase + dayLabelLineH);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // Zones alerte/standard + ligne de pacing, uniquement sur la periode en
+  // cours (clippee a la fenetre visible - toujours incluse par construction
+  // puisque windowEnd >= periodEnd et windowMs > periodMs).
+  const clipStart = Math.max(periodStart, windowStart);
+  const clipEnd = Math.min(periodEnd, windowEnd);
+  if (clipEnd > clipStart) {
+    const xStart = x(clipStart), xEnd = x(clipEnd);
+    const yStart = y(pacingThreshold(clipStart, periodStart, periodEnd));
+    const yEnd = y(pacingThreshold(clipEnd, periodStart, periodEnd));
+
+    // Zone alerte (au-dessus de la ligne)
+    ctx.fillStyle = col('--alert-zone');
+    ctx.beginPath();
+    ctx.moveTo(xStart, yStart);
+    ctx.lineTo(xEnd, yEnd);
+    ctx.lineTo(xEnd, y(100));
+    ctx.lineTo(xStart, y(100));
+    ctx.closePath();
+    ctx.fill();
+
+    // Zone standard (en dessous de la ligne)
+    ctx.fillStyle = col('--standard-zone');
+    ctx.beginPath();
+    ctx.moveTo(xStart, yStart);
+    ctx.lineTo(xEnd, yEnd);
+    ctx.lineTo(xEnd, y(0));
+    ctx.lineTo(xStart, y(0));
+    ctx.closePath();
+    ctx.fill();
+
+    // Ligne de separation
+    ctx.strokeStyle = col('--pacing-line');
+    ctx.setLineDash([5, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xStart, yStart);
+    ctx.lineTo(xEnd, yEnd);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Heures de pointe Anthropic (hachures), uniquement si demande pour ce
+  // graphe (active sur la session/24h, pas sur la semaine/3 semaines pour
+  // eviter des dizaines de bandes fines).
+  if (opts.showPeakHatch) {
+    getPeakIntervalsUTC(windowStart, windowEnd).forEach(([s, e]) => {
+      drawHatchedRect(ctx, x(s), padT, x(e), padT + plotH, col('--peak-hatch'), 7);
+    });
+  }
+
+  if (!visible.length) {
+    ctx.fillStyle = col('--muted');
+    ctx.font = `${fontEmpty}px sans-serif`;
+    const msg = points.length
+      ? 'Aucune donnee dans cette fenetre.'
+      : 'Pas encore de donnees - laisse le timer tourner quelques cycles.';
+    ctx.fillText(msg, padL + 10, padT + plotH / 2);
+  }
+
+  // 100% reference line
+  ctx.strokeStyle = col('--muted');
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(padL, y(100));
+  ctx.lineTo(padL + plotW, y(100));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // x axis labels (remplaces par les labels jour/date en mode "daily",
+  // deja dessines plus haut avec le quadrillage vertical) - heures rondes
+  // uniquement (compact ou non), a pas fixe en heures ; windowStart est
+  // deja cale sur une heure ronde donc chaque pas retombe pile dessus.
+  if (verticalGrid !== 'daily') {
+    ctx.fillStyle = col('--muted');
+    ctx.font = `${fontAxis}px sans-serif`;
+    const fullW = fontAxis * 3.6;
+    const HOUR = 3600 * 1000;
+    const hourStep = (compact && compactTickHourStep) ? compactTickHourStep : (tickHourStep || 4);
+    // Chaque label demarre juste apres son trait vertical (pas centre
+    // dessus), y compris le tout premier a windowStart. Le dernier est
+    // ramene dans le cadre ; un label qui chevaucherait alors le precedent
+    // est omis.
+    let prevRight = -Infinity;
+    for (let t = windowStart; t <= windowEnd; t += hourStep * HOUR) {
+      const label = String(new Date(t).getHours()).padStart(2, '0') + 'h';
+      const lx = Math.min(x(t) + 4, padL + plotW - fullW);
+      if (lx < prevRight) continue;
+      ctx.fillText(label, lx, cssHeight - 8);
+      prevRight = lx + ctx.measureText(label).width + fontAxis * 0.5;
+    }
+  }
+
+  // Ligne verticale "maintenant" - dessinee par-dessus le reste (zones,
+  // quadrillage) mais sous la courbe de donnees, pour reperer d'un coup
+  // d'oeil ou on en est dans la fenetre affichee (legende dans le titre
+  // du graphe, pas de texte redondant ici).
+  if (now >= windowStart && now <= windowEnd) {
+    const xNow = x(now);
+    ctx.strokeStyle = col('--now-line');
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(xNow, padT);
+    ctx.lineTo(xNow, padT + plotH);
+    ctx.stroke();
+  }
+
+  // Changements d'abonnement : les % de part et d'autre sont relatifs a
+  // des quotas differents. On marque la frontiere (et on coupe la courbe
+  // plus bas) pour que la rupture ne se lise pas comme un reset.
+  findTierChanges(points).forEach(c => {
+    if (c.ts < windowStart || c.ts > windowEnd) return;
+    const xc = x(c.ts);
+    ctx.strokeStyle = col('--plan-line');
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xc, padT);
+    ctx.lineTo(xc, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (!compact) {
+      const label = `${tierLabel(c.from)} -> ${tierLabel(c.to)}`;
+      ctx.fillStyle = col('--plan-line');
+      ctx.font = `${fontAxis}px sans-serif`;
+      const w = ctx.measureText(label).width;
+      ctx.fillText(label, Math.min(xc + 6, padL + plotW - w), padT + fontAxis * 2.4);
+    }
+  });
+
+  // Data lines : serie principale, puis serie secondaire eventuelle
+  // (dessinee par-dessus). Les points sans valeur coupent la courbe.
+  const drawSeries = (key, color) => {
+    const pts = visible.filter(p => !isNaN(p[key]));
+    if (!pts.length) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let prevTier = null;
+    let penDown = false;
+    visible.forEach(p => {
+      if (isNaN(p[key])) { penDown = false; return; }
+      const xx = x(p.ts.getTime());
+      const yy = y(p[key]);
+      const rebased = p.tier && prevTier && p.tier !== prevTier;
+      if (!penDown || rebased) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+      if (p.tier) prevTier = p.tier;
+      penDown = true;
+    });
+    ctx.stroke();
+    ctx.fillStyle = color;
+    pts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(x(p.ts.getTime()), y(p[key]), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  };
+  drawSeries(valueKey, col(lineColorVar));
+  if (secondaryKey) drawSeries(secondaryKey, col(secondaryColorVar));
+
+  // Hover tooltip
+  const tooltip = document.getElementById(tooltipId);
+  if (visible.length) {
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      let nearest = visible[0], nearestDist = Infinity;
+      visible.forEach(p => {
+        const d = Math.abs(x(p.ts.getTime()) - mx);
+        if (d < nearestDist) { nearestDist = d; nearest = p; }
+      });
+      tooltip.style.display = 'block';
+      tooltip.style.left = (mx + 20) + 'px';
+      tooltip.style.top = '20px';
+      const timeStr = nearest.ts.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const label = opts.tooltipShowDate
+        ? `${nearest.ts.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} (${timeStr})`
+        : timeStr;
+      const secondary = (secondaryKey && !isNaN(nearest[secondaryKey]))
+        ? ` - Fable ${nearest[secondaryKey].toFixed(0)}%`
+        : '';
+      tooltip.textContent = `${label} ${nearest[valueKey].toFixed(0)}%${secondary}`;
+    };
+    canvas.onmouseleave = () => { tooltip.style.display = 'none'; };
+  } else {
+    canvas.onmousemove = null;
+  }
+}
+
+function renderAll(points) {
+  renderChart('chart-session', 'tooltip-session', points, {
+    valueKey: 'session',
+    resetKey: 'sessionReset',
+    windowMs: 24 * 3600 * 1000,
+    compactWindowMs: 10 * 3600 * 1000,
+    periodMs: SESSION_PERIOD_MS,
+    lineColorVar: '--standard-text',
+    tickHourStep: 4,
+    compactTickHourStep: 2,
+    tooltipShowDate: false,
+    showPeakHatch: true,
+    verticalGrid: 'hourly',
+  });
+  renderChart('chart-weekly', 'tooltip-weekly', points, {
+    valueKey: 'weekly',
+    resetKey: 'weeklyReset',
+    windowMs: 21 * 24 * 3600 * 1000,
+    compactWindowMs: 14 * 24 * 3600 * 1000,
+    periodMs: WEEKLY_PERIOD_MS,
+    lineColorVar: '--weekly',
+    secondaryKey: 'fable',
+    secondaryColorVar: '--fable',
+    tooltipShowDate: true,
+    verticalGrid: 'daily',
+  });
+}
+
+// Mode compact (masque legendes/titres des graphes, % de l'axe Y, et
+// raccourcit les labels jour/date) - retient la preference d'un
+// rechargement a l'autre (la page se recharge seule toutes les 2 min).
+const COMPACT_KEY = 'monitoring-claude-compact';
+const compactToggle = document.getElementById('compact-toggle');
+function applyCompactState() {
+  let compact = false;
+  try { compact = localStorage.getItem(COMPACT_KEY) === '1'; } catch (e) { /* file:// peut bloquer localStorage */ }
+  document.body.classList.toggle('compact', compact);
+  compactToggle.classList.toggle('active', compact);
+}
+applyCompactState();
+
+const POINTS = parseData();
+// Legende Fable masquee quand l'historique n'a aucune mesure Fable (plan
+// sans plafond Fable, comme Pro).
+document.querySelector('.legend .l-fable').hidden = !POINTS.some(p => !isNaN(p.fable));
+renderStats(POINTS);
+renderAll(POINTS);
+
+compactToggle.addEventListener('click', () => {
+  const compact = document.body.classList.toggle('compact');
+  compactToggle.classList.toggle('active', compact);
+  try { localStorage.setItem(COMPACT_KEY, compact ? '1' : '0'); } catch (e) { /* ignore */ }
+  renderStats(POINTS);
+  renderAll(POINTS);
+});
+
+window.addEventListener('resize', () => {
+  renderStats(POINTS);
+  renderAll(POINTS);
+});
+
+// Recharge la page entiere depuis le disque toutes les 2 min pour recuperer
+// les donnees les plus recentes regenerees par le timer - fonctionne aussi
+// en file:// puisque c'est juste une navigation, pas un fetch.
+setTimeout(() => location.reload(), 2 * 60 * 1000);
+</script>
+</body>
+</html>

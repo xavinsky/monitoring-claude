@@ -1,0 +1,9 @@
+[Unit]
+Description=Mesure du quota Claude Code toutes les 10 min
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

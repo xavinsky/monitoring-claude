@@ -1,0 +1,6 @@
+[Unit]
+Description=Mesure du quota Claude Code (session 5h, semaine 7j, Fable 7j)
+
+[Service]
+Type=oneshot
+ExecStart="@EXEC_PATH@"

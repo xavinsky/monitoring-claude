@@ -1,0 +1,6 @@
+# Page generee (contient les CSV embarques, change a chaque tick des timers)
+www/index.html
+www/index.html.tmp
+
+# Reglages locaux de Claude Code
+.claude/settings.local.json

@@ -1,0 +1,9 @@
+[Unit]
+Description=Releve quotidien du statut heures de pointe Anthropic (promoclock.co)
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

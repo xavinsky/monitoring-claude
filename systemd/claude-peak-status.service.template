@@ -1,0 +1,6 @@
+[Unit]
+Description=Releve du statut heures de pointe Anthropic (promoclock.co)
+
+[Service]
+Type=oneshot
+ExecStart="@EXEC_PATH@"
