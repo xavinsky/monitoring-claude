@@ -1,6 +1,6 @@
 ---
 name: quota-zone-gate
-description: "Verifie via ~/.local/bin/claude_wait.sh (un seul script, aucun token de modele consomme) si le quota Claude Code (session 5h ET semaine 7j, plus le plafond Fable 7j pour une tache Fable via --fable) est en zone standard ET si on est en heures creuses Anthropic (planning calcule localement). Ne se declenche que sur demande EXPLICITE de l'utilisateur (ex: 'check le quota', 'est-ce qu'on peut lancer X maintenant', 'attends la zone verte', 'attends les heures creuses', 'active le garde-fou quota avant cette tache') - jamais de sa propre initiative avant une tache non urgente/lourde sans que l'utilisateur l'ait demande. Une fois invoque pour une tache a venir, toutes les dimensions bloquent symetriquement : si l'une n'est pas favorable, attend automatiquement (ScheduleWakeup) via la recommandation combinee du script - sauf si la tache est urgente, auquel cas on procede quand meme immediatement."
+description: "Verifie via ~/.local/bin/claude_wait.sh (un seul script, aucun token de modele consomme) si le quota Claude Code (session 5h ET semaine 7j, plus le plafond Fable 7j pour une tache Fable via --fable) est en zone standard ET si on est en heures creuses Anthropic (planning calcule localement). Ne se declenche que sur demande EXPLICITE de l'utilisateur (ex: 'check le quota', 'est-ce qu'on peut lancer X maintenant', 'attends la zone verte', 'attends les heures creuses', 'active le garde-fou quota avant cette tache') - jamais de sa propre initiative avant une tache non urgente/lourde sans que l'utilisateur l'ait demande. Une fois invoque pour une tache a venir, toutes les dimensions bloquent symetriquement : si l'une n'est pas favorable, programme un reveil unique a l'heure de reprise donnee par le script (CronCreate one-shot) - sauf si la tache est urgente, auquel cas on procede quand meme immediatement."
 ---
 
 # Quota zone gate
@@ -72,12 +72,13 @@ long, jusqu'a une trentaine d'heures) :
 
 ```
 Abonnement    : Max 5x (les % ci-dessous sont relatifs au quota de ce plan)
-Session (5h)  : 61% - zone ALERTE - retour en zone standard dans 1h11 (vers 10:15)
-Semaine (7j)  : 60% - zone ALERTE - retour en zone standard dans 36h56 (vers 01/08 22:00)
+Session (5h)  : 61% - zone ALERTE - retour en zone standard dans 1h11 (vers 10:15) - reprise a 10:17 (+2min)
+Semaine (7j)  : 60% - zone ALERTE - retour en zone standard dans 36h56 (vers 01/08 22:00) - reprise a 01/08 22:10 (+10min)
 Fable (7j)    : 20% - deja en zone STANDARD.
 Heures creuses : OUI (hors heures de pointe) - vitesse 'normal' - prochaine periode de pointe dans 4h12 (vers 15:00).
 
-=> Tache non urgente : ATTENDRE 36h56 (jusqu'a 01/08 22:00) - session en zone alerte + semaine en zone alerte.
+=> Tache non urgente : ATTENDRE 37h06 (jusqu'a 01/08 22:11) - session en zone alerte + semaine en zone alerte.
+=> Reprise : 2026-08-01T22:11+02:00 - cron "11 22 1 8 *" - delai 133560 s
 ```
 
 Sortie type (cas favorable, lance avec `--fable` ; sans l'option,
@@ -93,10 +94,17 @@ Heures creuses : OUI (hors heures de pointe) - vitesse 'normal' - prochaine peri
 => Tache non urgente : OK, rien ne bloque actuellement (session standard + semaine standard + Fable standard + heures creuses).
 ```
 
-La derniere ligne (`=> Tache non urgente : ...`) donne deja la decision
-et, si besoin d'attendre, la duree/heure cible combinee (le script prend
-lui-meme le plus long des delais bloquants) - pas besoin de recalculer
-quoi que ce soit, juste relayer/utiliser cette ligne.
+La ligne `=> Tache non urgente : ...` donne deja la decision et, si besoin
+d'attendre, l'heure de reprise combinee (le script prend lui-meme le plus
+long des delais bloquants). En cas d'attente, la ligne `=> Reprise : ...`
+donne cette meme heure sous forme exploitable : date ISO locale,
+expression cron one-shot prete a l'emploi, et delai en secondes. Pas
+besoin de recalculer quoi que ce soit, juste utiliser ces lignes.
+
+L'heure de reprise est l'heure de sortie de zone alerte (a consommation
+nulle d'ici la) plus une marge : +2 min pour la session 5h, +10 min pour
+la semaine 7j et le plafond Fable, arrondie a la minute superieure et
+jamais pile sur :00 ou :30.
 
 **Toutes les dimensions (session 5h, semaine 7j, plafond Fable 7j pour une
 tache Fable, heures de pointe) bloquent symetriquement** - le plafond Fable
@@ -129,23 +137,32 @@ alors qu'on est deja au-dessus du pacing.
 
 - **`=> Tache non urgente : ATTENDRE ...`** : ne demarre PAS la tache
   maintenant. Informe clairement l'utilisateur (reprends la ligne de
-  recommandation, plus le detail session/heures de pointe), puis
-  programme une reprise automatique avec `ScheduleWakeup` plutot que
-  d'attendre en synchrone :
-  - `delaySeconds` = la duree d'attente indiquee par le script,
-    plafonnee a 3600 (le maximum accepte par l'outil) - si l'attente
-    reelle depasse 1h, le reveil suivant relance `claude_wait.sh` et
-    re-programme un nouveau reveil si necessaire.
+  recommandation et l'heure de reprise), puis programme **un seul
+  reveil**, a l'heure de reprise, avec `CronCreate` (outil differe : le
+  charger via `ToolSearch("select:CronCreate")` si besoin) :
+  - `cron` = l'expression donnee par la ligne `=> Reprise` (heure
+    locale, jour et mois fixes).
+  - `recurring: false` (reveil unique, supprime apres declenchement).
   - `prompt` : redemarre ce skill (`quota-zone-gate`) puis, si le script
     indique maintenant "OK", lance effectivement la tache prevue ; sinon
-    reprogramme un nouveau reveil. Le prompt doit rappeler explicitement
-    quelle tache est en attente (nom/contexte), puisque le reveil arrive
-    dans un tour separe sans memoire immediate du raisonnement precedent.
-  - `reason` : une phrase courte, ex. "attente zone standard/heures
-    creuses avant de lancer <tache>".
+    programme un nouveau reveil a la nouvelle heure de reprise. Le prompt
+    doit rappeler explicitement quelle tache est en attente (nom/contexte),
+    puisque le reveil arrive dans un tour separe sans memoire immediate du
+    raisonnement precedent.
+
+  Pas de reveils intermediaires (toutes les heures, par exemple) : chaque
+  reveil est un tour de modele, qui consomme lui-meme du quota. Si, au
+  reveil, la zone est encore en alerte, c'est qu'il y a eu de la
+  consommation entre-temps (autres sessions) : le script donne alors une
+  nouvelle heure de reprise, et on reprogramme un reveil unique.
+
+  Seulement si `CronCreate` n'est pas disponible : `ScheduleWakeup` avec
+  `delaySeconds` = le delai de la ligne `=> Reprise`, plafonne a 3600 (le
+  maximum de l'outil), meme `prompt`, et `reason` = une phrase courte
+  (ex. "attente zone standard avant de lancer <tache>").
 
 Ne relance jamais le script en boucle serree avec des `sleep` - toujours
-passer par `ScheduleWakeup` pour rendre la main entre deux verifications.
+programmer un reveil pour rendre la main entre deux verifications.
 
 ## Exemple
 
@@ -154,16 +171,15 @@ passer par `ScheduleWakeup` pour rendre la main entre deux verifications.
 >
 > 1. Tache identifiee comme non urgente (lot de forks, pas de delai
 >    mentionne).
-> 2. `claude_wait.sh` renvoie `=> Tache non urgente : ATTENDRE 36h56
->    (jusqu'a 01/08 22:00) - session en zone alerte + semaine en zone
->    alerte.`
+> 2. `claude_wait.sh` renvoie `=> Tache non urgente : ATTENDRE 37h06
+>    (jusqu'a 01/08 22:11) - session en zone alerte + semaine en zone
+>    alerte.` puis `=> Reprise : 2026-08-01T22:11+02:00 - cron "11 22 1 8
+>    *" - delai 133560 s`.
 > 3. Reponse a l'utilisateur : "On est en zone alerte sur la session 5h
->    et la semaine 7j - je programme une reprise automatique vers le
->    01/08 22:00 plutot que de lancer les 12 forks tout de suite."
-> 4. `ScheduleWakeup(delaySeconds=3600, prompt="Relancer quota-zone-gate
->    puis, si claude_wait.sh indique OK, lancer le traitement des 12
->    fichiers restants de <chemin> ; sinon reprogrammer un nouveau
->    reveil", reason="attente zone standard (session+semaine) avant lot
->    de 12 forks")` - l'attente reelle (36h56) depasse largement le
->    plafond de 3600s d'un seul appel : chaque reveil relance le script
->    et re-programme le suivant jusqu'a ce que la zone soit standard.
+>    et la semaine 7j - je programme une reprise automatique le 01/08 a
+>    22:11 plutot que de lancer les 12 forks tout de suite."
+> 4. `CronCreate(cron="11 22 1 8 *", recurring=false, prompt="Relancer
+>    quota-zone-gate puis, si claude_wait.sh indique OK, lancer le
+>    traitement des 12 fichiers restants de <chemin> ; sinon programmer un
+>    nouveau reveil unique a la nouvelle heure de reprise")` - un seul
+>    reveil pour les 37h d'attente.

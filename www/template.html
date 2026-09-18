@@ -163,6 +163,11 @@
   .legend .l-now::before {
     background: var(--now-line);
   }
+  .legend .l-exit::before {
+    height: 0;
+    border-radius: 0;
+    border-top: 2px dashed var(--alert-text);
+  }
 </style>
 </head>
 <body>
@@ -182,6 +187,7 @@
         <span class="l-session">usage</span>
         <span class="l-standard">zone standard</span>
         <span class="l-alert">zone alerte</span>
+        <span class="l-exit">sortie de zone alerte</span>
         <span class="l-peak">heures de pointe (Anthropic)</span>
         <span class="l-now">maintenant</span>
       </span>
@@ -201,6 +207,7 @@
         <span class="l-fable">Fable (% du plafond Fable)</span>
         <span class="l-standard">zone standard</span>
         <span class="l-alert">zone alerte</span>
+        <span class="l-exit">sortie de zone alerte</span>
         <span class="l-now">maintenant</span>
       </span>
     </div>
@@ -557,7 +564,7 @@ function computeChartHeight(compact) {
 }
 
 function renderChart(canvasId, tooltipId, points, opts) {
-  const { valueKey, resetKey, secondaryKey, secondaryColorVar, windowMs, compactWindowMs, periodMs, lineColorVar, tickHourStep, compactTickHourStep, verticalGrid } = opts;
+  const { valueKey, resetKey, secondaryKey, secondaryResetKey, secondaryLabel, secondaryColorVar, windowMs, compactWindowMs, periodMs, lineColorVar, tickHourStep, compactTickHourStep, verticalGrid } = opts;
   const canvas = document.getElementById(canvasId);
   const wrap = canvas.parentElement;
   const dpr = window.devicePixelRatio || 1;
@@ -856,6 +863,49 @@ function renderChart(canvasId, tooltipId, points, opts) {
   drawSeries(valueKey, col(lineColorVar));
   if (secondaryKey) drawSeries(secondaryKey, col(secondaryColorVar));
 
+  // Sortie de zone alerte : a partir de la derniere mesure, segment
+  // horizontal au niveau de l'usage actuel jusqu'a ce que la ligne de
+  // pacing le rattrape (meme calcul que claude_wait.sh, sans sa marge de
+  // reprise), avec l'heure de sortie - et le jour sur le graphe semaine.
+  const drawAlertExit = (key, resetK, prefix) => {
+    if (!last || isNaN(last[key])) return;
+    const wait = waitForStandard(last[key], last[resetK], periodMs, now);
+    if (!wait) return;
+    const exitT = now + wait.waitMs;
+    const x1 = x(Math.max(last.ts.getTime(), windowStart));
+    const x2 = x(Math.min(exitT, windowEnd));
+    const yy = y(last[key]);
+    const alertColor = col('--alert-text');
+    ctx.strokeStyle = alertColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x1, yy);
+    ctx.lineTo(x2, yy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x2, yy - 8);
+    ctx.lineTo(x2, yy + 8);
+    ctx.stroke();
+
+    const exitDate = new Date(exitT);
+    const time = exitDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const when = verticalGrid === 'daily'
+      ? `${DAY_ABBREV_FR[exitDate.getDay()]} ${exitDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} ${time}`
+      : time;
+    const label = `${prefix}${compact ? '' : 'sortie '}${when}`;
+    ctx.fillStyle = alertColor;
+    ctx.font = `${fontAxis}px sans-serif`;
+    const w = ctx.measureText(label).width;
+    const lx = Math.max(padL + 4, Math.min(x2 - w / 2, padL + plotW - w));
+    // Au-dessus du segment, ou en dessous s'il est colle au haut du graphe.
+    const ly = yy - 10 - fontAxis < padT ? yy + 10 + fontAxis : yy - 10;
+    ctx.fillText(label, lx, ly);
+  };
+  drawAlertExit(valueKey, resetKey, '');
+  if (secondaryKey) drawAlertExit(secondaryKey, secondaryResetKey, secondaryLabel + ' ');
+
   // Hover tooltip
   const tooltip = document.getElementById(tooltipId);
   if (visible.length) {
@@ -907,6 +957,8 @@ function renderAll(points) {
     periodMs: WEEKLY_PERIOD_MS,
     lineColorVar: '--weekly',
     secondaryKey: 'fable',
+    secondaryResetKey: 'fableReset',
+    secondaryLabel: 'Fable',
     secondaryColorVar: '--fable',
     tooltipShowDate: true,
     verticalGrid: 'daily',

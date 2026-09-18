@@ -113,8 +113,9 @@ pour le detail du calcul des zones affichees sur les graphes.
 - Dashboard statique et autonome (pas de serveur, donnees embarquees
   dans le HTML a chaque regeneration).
 - Skill Claude Code (`/quota-zone-gate`, a activer volontairement) qui
-  verifie le quota avant une tache non urgente/lourde et decale si
-  besoin (le plafond Fable ne bloque que les taches Fable).
+  verifie le quota avant une tache non urgente/lourde et, si besoin, la
+  decale avec un seul reveil a l'heure de sortie de zone alerte (le
+  plafond Fable ne bloque que les taches Fable).
 - Scripts d'installation, de mise a jour et de desinstallation
   idempotents (`uninstall.sh --purge` pour aussi supprimer les donnees
   collectees).

@@ -64,6 +64,15 @@ standard (fond vert). Si l'usage depasse 90%, le seuil ne le rattrapera
 jamais avant la fin de la periode : le retour n'arrive qu'au prochain
 reset.
 
+**Sortie de zone alerte** : quand l'usage actuel est en zone alerte, un
+segment horizontal rouge en pointilles le prolonge, a partir de la
+derniere mesure, jusqu'au point ou la ligne de pacing le rattrape, avec
+l'heure de sortie (et le jour sur le graphe 7j). Ce calcul suppose qu'il
+n'y a plus de consommation d'ici la : chaque point de % consomme en plus
+repousse la sortie de 5 min sur la session 5h, et de 2h48 sur la semaine 7j
+(la ligne monte de 60 points sur la periode). Pour la meme raison,
+l'arrondi des % a l'entier renvoye par l'API rend cette heure approximative.
+
 **Changement d'abonnement** : les pourcentages renvoyes par l'API sont
 relatifs au quota du plan en cours - un 60% en Pro et un 60% en Max 5x ne
 representent pas la meme consommation absolue. Chaque ligne de `usage.csv`
@@ -127,13 +136,24 @@ une fois active ; il peut aussi etre lance a la main :
 ```
 
 ```
-Session (5h)  : 82% - zone ALERTE - retour en zone standard dans 47min (vers 11:32)
-Semaine (7j)  : 60% - zone ALERTE - retour en zone standard dans 36h56 (vers 01/08 22:00)
+Session (5h)  : 82% - zone ALERTE - retour en zone standard dans 47min (vers 11:32) - reprise a 11:35 (+2min)
+Semaine (7j)  : 60% - zone ALERTE - retour en zone standard dans 36h56 (vers 01/08 22:00) - reprise a 01/08 22:11 (+10min)
 Fable (7j)    : 20% - deja en zone STANDARD.
 Heures creuses : NON (heures de pointe en cours) - retour en heures creuses dans 20min (vers 11:05).
 
-=> Tache non urgente : ATTENDRE 36h56 (jusqu'a 01/08 22:00) - session en zone alerte + semaine en zone alerte + heures de pointe.
+=> Tache non urgente : ATTENDRE 37h06 (jusqu'a 01/08 22:11) - session en zone alerte + semaine en zone alerte + heures de pointe.
+=> Reprise : 2026-08-01T22:11+02:00 - cron "11 22 1 8 *" - delai 133560 s
 ```
+
+L'heure de reprise est l'heure de sortie de zone alerte plus une marge :
++2 min pour la session 5h, +10 min pour la semaine 7j et le plafond Fable.
+Elle est arrondie a la minute superieure et jamais placee pile sur :00 ou
+:30, car un reveil cron one-shot a ces minutes peut partir jusqu'a 90 s en
+avance. La recommandation combinee prend la plus tardive des heures de
+reprise bloquantes. La ligne `=> Reprise`, presente seulement en cas
+d'attente, donne cette heure sous forme exploitable (ISO local, cron,
+delai en secondes) : c'est elle que le skill utilise pour programmer son
+reveil.
 
 Il reimplemente en Python le meme calcul de zone de pacing que le
 dashboard (en JS) - les deux utilisent la meme formule (seuil 30%→90%)
@@ -151,8 +171,10 @@ Claude Code) - jamais de sa propre initiative avant une tache non
 urgente/lourde. Une fois active pour une tache **non urgente** ou
 **lourde** (gros lot de forks paralleles, boucle longue...), l'agent
 verifie la recommandation du script, et si elle indique d'attendre,
-programme une reprise automatique (`ScheduleWakeup`) au lieu de lancer
-la tache tout de suite. Les taches urgentes ne sont jamais bloquees.
+programme un reveil unique a l'heure de reprise (`CronCreate` one-shot,
+avec `ScheduleWakeup` en repli) au lieu de lancer la tache tout de suite.
+Pas de reveils intermediaires : chaque reveil est un tour de modele qui
+consomme lui-meme du quota. Les taches urgentes ne sont jamais bloquees.
 
 ## Structure du depot
 

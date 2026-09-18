@@ -108,6 +108,24 @@ def pacing_threshold(t, period_start, period_end):
     return PACING_START + frac * (PACING_END - PACING_START)
 
 
+# Marge ajoutee a l'heure de sortie de zone alerte pour fixer l'heure de
+# reprise : l'API renvoie des % entiers, donc l'heure de croisement calculee
+# est approximative (1 point = 5 min sur la session, 2h48 sur la semaine).
+REPRISE_MARGIN = {SESSION_PERIOD: 2 * 60, WEEKLY_PERIOD: 10 * 60}
+
+
+# Heure de reprise (datetime locale) pour un instant donne : arrondie a la
+# minute superieure, et jamais pile sur :00 ou :30, car un reveil programme
+# par cron a ces minutes peut partir jusqu'a 90 s en avance.
+def reprise_at(ts):
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+    if dt.second or dt.microsecond:
+        dt = dt.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    if dt.minute in (0, 30):
+        dt += timedelta(minutes=1)
+    return dt
+
+
 def wait_for_standard(usage, reset_iso, period_seconds):
     if not reset_iso:
         return None, None
@@ -122,6 +140,8 @@ def wait_for_standard(usage, reset_iso, period_seconds):
     return crossing - now, None
 
 
+# Retourne le delai avant l'heure de reprise conseillee (sortie de zone
+# alerte + marge), 0 si rien ne bloque.
 def report_usage(label, usage_str, reset_iso, period_seconds):
     if not usage_str:
         print(f"{label:14s}: verification indisponible (API usage inaccessible).")
@@ -136,11 +156,14 @@ def report_usage(label, usage_str, reset_iso, period_seconds):
     if wait_s <= 0:
         print(f"{label:14s}: {usage:.0f}% - deja en zone STANDARD.")
         return 0.0
-    when = datetime.fromtimestamp(now + wait_s, tz=timezone.utc).astimezone().strftime(
-        '%H:%M' if period_seconds == SESSION_PERIOD else '%d/%m %H:%M')
+    fmt = '%H:%M' if period_seconds == SESSION_PERIOD else '%d/%m %H:%M'
+    margin = REPRISE_MARGIN[period_seconds]
+    when = datetime.fromtimestamp(now + wait_s, tz=timezone.utc).astimezone().strftime(fmt)
+    when_reprise = reprise_at(now + wait_s + margin).strftime(fmt)
     suffix = f" (au reset, le seuil plafonne a {PACING_END:.0f}%)" if note == "reset" else ""
-    print(f"{label:14s}: {usage:.0f}% - zone ALERTE - retour en zone standard dans {fmt_duration(wait_s)} (vers {when}){suffix}")
-    return wait_s
+    print(f"{label:14s}: {usage:.0f}% - zone ALERTE - retour en zone standard dans {fmt_duration(wait_s)} (vers {when}){suffix}"
+          f" - reprise a {when_reprise} (+{margin // 60}min)")
+    return wait_s + margin
 
 
 session_wait = report_usage("Session (5h)", session_usage, session_reset, SESSION_PERIOD)
@@ -194,9 +217,11 @@ print()
 if overall_wait <= 0:
     print(f"=> Tache non urgente : OK, rien ne bloque actuellement (session standard + semaine standard{' + Fable standard' if fable_usage and fable_task else ''} + heures creuses).")
 else:
+    reprise = reprise_at(now + overall_wait)
+    overall_wait = (reprise - now_dt).total_seconds()
     # Format avec date si l'attente depasse ~20h (sinon HH:MM seul serait ambigu)
     fmt = '%d/%m %H:%M' if overall_wait > 20 * 3600 else '%H:%M'
-    when_overall = datetime.fromtimestamp(now + overall_wait, tz=timezone.utc).astimezone().strftime(fmt)
+    when_overall = reprise.strftime(fmt)
     blockers = []
     if session_wait > 0:
         blockers.append("session en zone alerte")
@@ -207,4 +232,7 @@ else:
     if is_peak_now:
         blockers.append("heures de pointe")
     print(f"=> Tache non urgente : ATTENDRE {fmt_duration(overall_wait)} (jusqu'a {when_overall}) - {' + '.join(blockers)}.")
+    # Heure de reprise sous forme exploitable pour programmer le reveil
+    # (cron one-shot en heure locale, ou delai en secondes).
+    print(f"=> Reprise : {reprise.isoformat(timespec='minutes')} - cron \"{reprise.minute} {reprise.hour} {reprise.day} {reprise.month} *\" - delai {int(overall_wait)} s")
 PYEOF
