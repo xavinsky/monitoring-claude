@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Xavier Manach"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Quota Claude Code (session 5h, semaine 7j, Fable) et zones de pacing",
+        "Icon": "utilities-system-monitor",
+        "Id": "com.github.xavinsky.monitoringclaude",
+        "License": "MIT",
+        "Name": "Quota Claude",
+        "Version": "1.0",
+        "Website": "https://github.com/xavinsky/monitoring-claude"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

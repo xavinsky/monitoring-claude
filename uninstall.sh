@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Desinstalle ce que install.sh a pose hors du depot (timers systemd, liens
-# du skill et de claude_wait.sh), puis demande s'il faut aussi supprimer les
+# du skill et de claude_wait.sh, widget Plasma), puis demande s'il faut aussi supprimer les
 # donnees collectees. --purge les supprime sans demander ; sans terminal
 # interactif et sans --purge, elles sont conservees.
 set -euo pipefail
@@ -9,6 +9,8 @@ REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 UNIT_DIR="$HOME/.config/systemd/user"
 SKILLS_DIR="$HOME/.claude/skills"
 BIN_DIR="$HOME/.local/bin"
+PLASMOIDS_DIR="$HOME/.local/share/plasma/plasmoids"
+PLASMOID_ID="com.github.xavinsky.monitoringclaude"
 DATA_DIR="$HOME/.config/monitoring-claude"
 
 PURGE=0
@@ -40,6 +42,15 @@ remove_link() {
 
 remove_link "$SKILLS_DIR/quota-zone-gate" "$REPO_DIR/skills/quota-zone-gate"
 remove_link "$BIN_DIR/claude_wait.sh" "$REPO_DIR/bin/claude_wait.sh"
+# Widget Plasma : copie, supprimee seulement si elle a ete installee depuis
+# ce depot.
+plasmoid_dir="$PLASMOIDS_DIR/$PLASMOID_ID"
+if grep -qsF "\"$REPO_DIR/www/index.html\"" "$plasmoid_dir/contents/code/install.js"; then
+  rm -rf "$plasmoid_dir"
+  echo "==> Widget Plasma supprime : $plasmoid_dir"
+elif [ -e "$plasmoid_dir" ]; then
+  echo "==> Laisse en place (pas installe depuis ce depot) : $plasmoid_dir"
+fi
 
 echo
 echo "==> Desinstalle."

@@ -102,13 +102,45 @@ donne en clair par l'API promoclock, mais code en dur cote client pour ce
 hachurage (et dans `claude_wait.sh`, voir "Limites connues" plus bas pour
 la nuance).
 
+### Widget KDE Plasma
+
+`plasmoid/` est un widget Plasma 6 (QML), copie par `install.sh` dans
+`~/.local/share/plasma/plasmoids/com.github.xavinsky.monitoringclaude/`.
+C'est la seule piece installee par copie plutot que par lien : Plasma
+n'enumere pas un paquet qui est un lien, et refuse de charger des fichiers
+situes hors du dossier du paquet. La copie est refaite a chaque
+`install.sh` (donc a chaque `update.sh`), avec en plus un `install.js`
+genere qui donne au widget le chemin du dashboard. Il lit la fin de `usage.csv`
+chaque minute (source `executable` de `plasma5support`, pas d'appel
+reseau) et affiche :
+
+- dans la barre (`CompactView.qml`) : pour chaque quota, un mini-graphe de
+  la periode en cours (zones, ligne de pacing, courbe, segment de sortie
+  de zone alerte), le % colore selon la zone, un fond rouge pale en zone
+  alerte. Fable n'apparait que si l'abonnement a un plafond Fable. Le
+  widget est attenue quand la derniere mesure a plus de 15 min ;
+- au clic (`FullView.qml`) : la vue compacte du dashboard - cartes des
+  quotas, graphes 5h et 7j, derniere mesure, bouton d'ouverture du
+  dashboard complet ;
+- au survol : le detail texte (zone, heure de sortie, resets).
+
+Barre et popup sont en theme clair (palette claire du dashboard), quel que
+soit le theme Plasma : dans la barre, chaque quota est une petite carte
+claire.
+
+La logique (parsing du CSV, pacing, zones) et le dessin des graphes sont
+dans `www/quota-core.js`, partage avec le dashboard : le dashboard
+l'embarque a la generation, le widget l'importe par le lien
+`plasmoid/contents/code/quota-core.js`. Le Canvas QML ayant la meme API 2D
+que le canvas du navigateur, les graphes sont dessines par le meme code.
+
 ## Generation de la page statique
 
 A chaque execution reussie de `log-ccusage.sh` (~10 min) ou
 `log-peak-status.sh` (1x/jour), le script appelle
 `bin/generate-page.py`, qui lit `usage.csv`, lit le gabarit
-`www/template.html`, et embarque directement le contenu du CSV dans le
-HTML (comme une chaine JS), puis ecrit `www/index.html`. Le fichier
+`www/template.html`, et y embarque directement `www/quota-core.js` et le
+contenu du CSV (comme une chaine JS), puis ecrit `www/index.html`. Le fichier
 resultant est donc statique et autonome - toutes les donnees sont deja
 dedans, pas d'appel reseau au chargement.
 
@@ -155,9 +187,9 @@ d'attente, donne cette heure sous forme exploitable (ISO local, cron,
 delai en secondes) : c'est elle que le skill utilise pour programmer son
 reveil.
 
-Il reimplemente en Python le meme calcul de zone de pacing que le
-dashboard (en JS) - les deux utilisent la meme formule (seuil 30%→90%)
-pour rester coherents.
+Il reimplemente en Python le meme calcul de zone de pacing que
+`www/quota-core.js` (dashboard et widget) - les deux utilisent la meme
+formule (seuil 30%→90%) pour rester coherents.
 
 ## Skill Claude Code : quota-zone-gate
 
@@ -180,7 +212,7 @@ consomme lui-meme du quota. Les taches urgentes ne sont jamais bloquees.
 
 ```
 monitoring-claude/
-├── install.sh                  installe les 2 timers systemd, le skill et le lien claude_wait.sh
+├── install.sh                  installe les 2 timers systemd, le skill, le lien claude_wait.sh et le widget Plasma
 ├── update.sh                   git pull --ff-only puis install.sh
 ├── uninstall.sh                desinstalle tout ca, demande (ou --purge) pour les donnees
 ├── LICENSE                     MIT
@@ -195,10 +227,16 @@ monitoring-claude/
 │   └── claude-peak-status.service.template / .timer   (1x/jour, 06:00)
 ├── skills/
 │   └── quota-zone-gate/SKILL.md  skill Claude Code (symlinke par install.sh dans ~/.claude/skills/)
+├── plasmoid/                     widget KDE Plasma 6 (copie par install.sh dans ~/.local/share/plasma/plasmoids/)
+│   ├── metadata.json
+│   └── contents/
+│       ├── ui/                   main.qml, CompactView.qml (barre), FullView.qml (popup), QuotaChart.qml, Sparkline.qml
+│       └── code/                 quota-core.js (lien vers www/), palette.js (couleurs du dashboard)
 ├── docs/
 │   └── screenshots/              captures du README.md (donnees fictives) + generer-captures.py
 └── www/
-    ├── template.html            gabarit statique (CSS + JS de rendu)
+    ├── quota-core.js            logique et dessin des graphes, partages avec le widget
+    ├── template.html            gabarit statique (CSS + JS propre a la page)
     └── index.html               page generee - c'est celle-ci qu'on ouvre
 ```
 
@@ -217,6 +255,7 @@ monitoring-claude/
 | `www/index.html` | dans ce depot | Page generee, statique et autonome (donnees deja embarquees, aucun appel reseau au chargement) | Reecrite a chaque log reussi |
 | Navigateur (page ouverte par l'utilisateur) | poste local | Parse les donnees embarquees, dessine les graphes, se recharge lui-meme | Auto-reload toutes les 2 min |
 | `bin/claude_wait.sh` | dans ce depot, lien `~/.local/bin/claude_wait.sh` (par `install.sh`) | Interroge l'API quota Anthropic **en direct** ; pour les heures de pointe, calcule localement (planning fixe) et lit juste la vitesse dans `peak-status.csv` - n'appelle jamais promoclock.co | A la demande, aucun timer |
+| `plasmoid/` (widget "Quota Claude") | copie dans `~/.local/share/plasma/plasmoids/com.github.xavinsky.monitoringclaude/` (par `install.sh`, si Plasma est installe) | Mini-graphes et % des quotas dans la barre KDE, vue compacte du dashboard au clic | Relit `usage.csv` chaque minute |
 | `skills/quota-zone-gate/SKILL.md` | symlink dans `~/.claude/skills/` (par `install.sh`) | Appelle `claude_wait.sh` avant une tache non urgente/lourde et bloque/reprogramme si besoin | A chaque fois qu'un agent Claude Code envisage une tache non urgente/lourde |
 
 ## Diagramme des composants
@@ -276,9 +315,10 @@ flowchart TD
 
 ## Details d'installation
 
-Le depot est l'installation : aucun fichier n'est copie, tout ce qui est
-pose hors du depot pointe vers lui. Modifier un script ou le skill dans le
-depot prend donc effet immediatement, sans reinstaller.
+Le depot est l'installation : tout ce qui est pose hors du depot pointe
+vers lui, a l'exception du widget Plasma (copie, voir
+[Widget KDE Plasma](#widget-kde-plasma)). Modifier un script ou le skill
+dans le depot prend donc effet immediatement, sans reinstaller.
 
 `install.sh` est idempotent (aucun `sudo` necessaire) :
 
@@ -286,18 +326,21 @@ depot prend donc effet immediatement, sans reinstaller.
 2. Cree `~/.config/monitoring-claude` si besoin.
 3. Genere les 2 unites systemd user depuis `systemd/` avec le chemin du
    depot, puis active les timers (voir tableau des composants).
-4. Pose deux liens symboliques : `~/.claude/skills/quota-zone-gate` vers
-   `skills/quota-zone-gate/`, et `~/.local/bin/claude_wait.sh` vers
+4. Pose les liens symboliques : `~/.claude/skills/quota-zone-gate` vers
+   `skills/quota-zone-gate/`, `~/.local/bin/claude_wait.sh` vers
    `bin/claude_wait.sh`. Si un fichier ou dossier reel porte deja l'un de
    ces noms, il s'arrete sans rien ecraser.
-5. Genere `www/index.html`.
+5. Si `plasmashell` est present, copie le widget `plasmoid/` dans
+   `~/.local/share/plasma/plasmoids/com.github.xavinsky.monitoringclaude/`
+   (voir [Widget KDE Plasma](#widget-kde-plasma)).
+6. Genere `www/index.html`.
 
 `update.sh` fait un `git pull --ff-only` (si une branche distante est
 suivie) puis relance `install.sh`. Les CSV existants sont mis a niveau
 (colonnes ajoutees, laissees vides sur l'historique) au prochain releve.
 
 `uninstall.sh` desactive et supprime les unites systemd, supprime les
-deux liens s'ils pointent bien vers ce depot, puis propose de supprimer
+liens s'ils pointent bien vers ce depot, puis propose de supprimer
 les donnees (`--purge` pour le faire sans demander ; conservees sans
 terminal interactif). Si le depot est deplace, relancer `install.sh`
 depuis son nouvel emplacement suffit a tout repointer.
@@ -321,6 +364,13 @@ tail -f ~/.config/monitoring-claude/peak-status.csv
 ```
 
 ## Limites connues
+
+- Le widget Plasma est une copie : une modification de `plasmoid/` ou de
+  `www/quota-core.js` ne l'atteint qu'apres `install.sh`, puis un
+  redemarrage de Plasma (`systemctl --user restart plasma-plasmashell`),
+  qui garde en cache le QML d'un widget deja charge.
+- Les couleurs du widget (`plasmoid/contents/code/palette.js`) reprennent
+  les variables CSS de `www/template.html` : a garder synchronisees.
 
 - `/api/oauth/usage` et `/api/oauth/profile` ne sont pas des API
   documentees par Anthropic : ce sont celles qu'utilise l'interface de

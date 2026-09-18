@@ -12,6 +12,7 @@ standard. Rien n'est lu ni ecrit dans les donnees reelles.
 
 Usage : docs/screenshots/generer-captures.py   (necessite google-chrome)
 """
+import importlib.util
 import random
 import subprocess
 import tempfile
@@ -20,6 +21,11 @@ from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent
 REPO_DIR = OUT_DIR.parent.parent
+
+# Meme assemblage de page que bin/generate-page.py (nom de module non importable tel quel).
+_spec = importlib.util.spec_from_file_location("generate_page", REPO_DIR / "bin" / "generate-page.py")
+generate_page = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(generate_page)
 
 TICK = timedelta(minutes=10)
 DAY = timedelta(days=1)
@@ -249,9 +255,7 @@ def generate(tier, weekly_range, sess_per_week, fable, seed):
 
 
 def render(csv_text, compact):
-    template = (REPO_DIR / "www" / "template.html").read_text()
-    escaped = csv_text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${").replace("</", "<\\/")
-    html = template.replace("__CCUSAGE_CSV__", escaped)
+    html = generate_page.render(csv_text)
     html = html.replace("setTimeout(() => location.reload(), 2 * 60 * 1000);", "")
     if compact:
         html = html.replace("compact = localStorage.getItem(COMPACT_KEY) === '1';", "compact = true;")

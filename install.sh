@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Installe monitoring-claude pour l'utilisateur courant. Le depot est
-# l'installation : rien n'est copie, tout ce qui est pose hors du depot
-# pointe vers lui.
+# l'installation : tout ce qui est pose hors du depot pointe vers lui, sauf
+# le widget Plasma, copie (voir plus bas).
 #   - ~/.config/systemd/user/claude-{usage-log,peak-status}.{service,timer}
 #     (unites generees depuis systemd/, avec le chemin de ce depot)
 #   - ~/.claude/skills/quota-zone-gate -> skills/quota-zone-gate (lien)
 #   - ~/.local/bin/claude_wait.sh      -> bin/claude_wait.sh (lien, chemin
 #     stable utilise par le skill)
+#   - ~/.local/share/plasma/plasmoids/com.github.xavinsky.monitoringclaude/
+#     (copie de plasmoid/, widget KDE Plasma 6, seulement si Plasma est la)
 # Relancable sans risque (idempotent) ; a relancer si le depot est deplace.
 set -euo pipefail
 
@@ -15,6 +17,8 @@ DATA_DIR="$HOME/.config/monitoring-claude"
 UNIT_DIR="$HOME/.config/systemd/user"
 SKILLS_DIR="$HOME/.claude/skills"
 BIN_DIR="$HOME/.local/bin"
+PLASMOIDS_DIR="$HOME/.local/share/plasma/plasmoids"
+PLASMOID_ID="com.github.xavinsky.monitoringclaude"
 
 # --- Prerequis ---
 
@@ -78,6 +82,23 @@ systemctl --user enable --now claude-usage-log.timer claude-peak-status.timer
 echo "==> Liens symboliques"
 install_link "$REPO_DIR/skills/quota-zone-gate" "$SKILLS_DIR/quota-zone-gate"
 install_link "$REPO_DIR/bin/claude_wait.sh" "$BIN_DIR/claude_wait.sh"
+# --- Widget Plasma ---
+
+# Copie de plasmoid/ (liens resolus) plutot qu'un lien : Plasma n'enumere
+# pas un paquet qui est un lien, et refuse de charger des fichiers situes
+# hors du dossier du paquet. Rafraichie a chaque install.sh (donc a chaque
+# update.sh) ; install.js indique au widget ou est le dashboard.
+plasma=0
+if command -v plasmashell >/dev/null 2>&1; then
+  plasma=1
+  plasmoid_dir="$PLASMOIDS_DIR/$PLASMOID_ID"
+  echo "==> Widget Plasma : $plasmoid_dir"
+  rm -rf "$plasmoid_dir"
+  mkdir -p "$PLASMOIDS_DIR"
+  cp -rL "$REPO_DIR/plasmoid" "$plasmoid_dir"
+  printf 'var DASHBOARD_FILE = %s;\n' "$(jq -Rn --arg p "$REPO_DIR/www/index.html" '$p')" \
+    > "$plasmoid_dir/contents/code/install.js"
+fi
 
 # --- Page ---
 
@@ -91,3 +112,8 @@ systemctl --user list-timers claude-usage-log.timer claude-peak-status.timer --n
 echo
 echo "Donnees collectees dans : $DATA_DIR/"
 echo "Dashboard a ouvrir      : $REPO_DIR/www/index.html"
+if [ "$plasma" = "1" ]; then
+  echo "Widget KDE Plasma       : clic droit sur la barre > Ajouter ou gerer des composants graphiques > \"Quota Claude\""
+  echo "                          (un widget deja en place ne se met a jour qu'au redemarrage de Plasma :"
+  echo "                           systemctl --user restart plasma-plasmashell)"
+fi

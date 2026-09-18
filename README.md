@@ -46,10 +46,11 @@ cd monitoring-claude
 ```
 
 Installe les timers de collecte, genere le dashboard, et installe le
-skill Claude Code. Le depot est l'installation : rien n'est copie
-ailleurs, `install.sh` pose seulement des liens symboliques et des unites
-systemd qui pointent vers le depot - ne pas le supprimer ni le deplacer
-sans relancer `./install.sh` (ou desinstaller d'abord).
+skill Claude Code (et le widget KDE Plasma si Plasma est present). Le
+depot est l'installation : `install.sh` pose des liens symboliques et des
+unites systemd qui pointent vers le depot - ne pas le supprimer ni le
+deplacer sans relancer `./install.sh` (ou desinstaller d'abord). Seul le
+widget Plasma est copie, Plasma n'acceptant pas un widget en lien.
 
 ## Mise a jour
 
@@ -102,6 +103,16 @@ lui, n'est fait que toutes les 10 min par le timer - voir
 Voir [README.infra.md](README.infra.md#zone-standard-zone-alerte-et-zone-de-pointe)
 pour le detail du calcul des zones affichees sur les graphes.
 
+### 3. Widget KDE Plasma
+
+Sous KDE Plasma 6, `install.sh` installe aussi un widget "Quota Claude" a
+ajouter a la barre des taches (clic droit sur la barre > Ajouter ou gerer
+des composants graphiques). Dans la barre : un mini-graphe par quota (5h,
+7j, et Fable si l'abonnement en a un) sur sa periode en cours, avec le %
+colore et un fond rouge pale en zone alerte ; le survol donne le detail
+(heure de sortie de zone alerte, resets). Au clic : la vue compacte du
+dashboard dans un popup.
+
 ## Fonctionnalites et composants
 
 - Collecte automatique en arriere-plan (2 timers systemd user, aucun
@@ -112,6 +123,8 @@ pour le detail du calcul des zones affichees sur les graphes.
   de laisser croire a une chute de consommation.
 - Dashboard statique et autonome (pas de serveur, donnees embarquees
   dans le HTML a chaque regeneration).
+- Widget KDE Plasma 6 pour la barre des taches, avec la vue compacte du
+  dashboard au clic.
 - Skill Claude Code (`/quota-zone-gate`, a activer volontairement) qui
   verifie le quota avant une tache non urgente/lourde et, si besoin, la
   decale avec un seul reveil a l'heure de sortie de zone alerte (le
